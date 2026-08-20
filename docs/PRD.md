@@ -1,15 +1,14 @@
 # Product Requirements Document
-## Private AI Knowledge Base v1.0
+## Private AI Knowledge Base v1.1
 
-**Status:** MVP / Initial baseline  
-**Product:** Private AI Knowledge Base  
-**Primary deployment:** Self-hosted / On-Premise  
+**Status:** MVP / Revised Baseline  
+**Primary deployment:** Self-hosted / Private Cloud / On-Premise
 
 ## 1. Product Vision
 
-Private AI Knowledge Base transforms company documents into a permission-aware AI knowledge system that employees can query using natural language.
+Private AI Knowledge Base transforms company documents into a permission-aware AI knowledge system that employees can search and query using natural language.
 
-The product must allow the customer to control where documents, embeddings, metadata and AI processing are hosted. LLM, embedding provider, object storage and vector database are configurable through **Settings**.
+The MVP prioritizes data sovereignty, low infrastructure cost, pluggable AI/search components, and deployment inside customer-controlled infrastructure. The MVP is intentionally **single-organization**; multi-tenancy is out of scope.
 
 ## 2. Target Customers
 
@@ -20,16 +19,16 @@ The product must allow the customer to control where documents, embeddings, meta
 
 ## 3. Deployment Models
 
-### 3.1 Cloud
-Vendor-managed infrastructure.
+### 3.1 Self-hosted / On-Premise
+All core components run inside the customer's network.
 
 ### 3.2 Private Cloud
-Dedicated customer environment.
+Dedicated customer-controlled environment.
 
-### 3.3 On-Premise
-All application components run inside the customer's network.
+### 3.3 Cloud
+Supported when the customer explicitly chooses cloud services.
 
-The application must not require vendor infrastructure for core operation in On-Premise mode.
+Self-hosted/on-premise core operation must not require vendor-hosted infrastructure.
 
 ## 4. Core Functional Requirements
 
@@ -42,24 +41,17 @@ The application must not require vendor infrastructure for core operation in On-
 
 ### 4.2 RBAC
 
-Roles:
+MVP roles:
 
-- SUPER_ADMIN
-- ADMIN
-- MANAGER
-- USER
+- **SUPER_USER** — full system administration, provider/storage/search configuration, user and role management
+- **EDITOR** — manage documents/knowledge content and normal knowledge operations
+- **VIEWER** — read/search permitted knowledge and use RAG chat; cannot modify content or system settings
 
-Permissions must apply to Knowledge Spaces and documents.
+There is no multi-tenant organization model in the MVP.
 
-### 4.3 Organization
+### 4.3 Knowledge Collections
 
-Every tenant has isolated users, settings, knowledge spaces, documents, chats and audit records.
-
-All tenant-owned entities must include `tenant_id` or an equivalent isolation mechanism.
-
-### 4.4 Knowledge Spaces
-
-A Knowledge Space is a logical collection of documents with its own membership and access rules.
+A Knowledge Collection is a logical collection of company documents with access rules.
 
 Examples:
 
@@ -70,9 +62,9 @@ Examples:
 - Sales
 - SOP
 
-Users must only retrieve content they are authorized to access.
+Users may only search and retrieve content for which they have permission.
 
-### 4.5 Document Management
+### 4.4 Document Management
 
 MVP supported formats:
 
@@ -100,96 +92,101 @@ Processing lifecycle:
 
 `UPLOADED -> PROCESSING -> CHUNKING -> EMBEDDING -> INDEXED`
 
-Failure state:
+Failure state: `FAILED`
 
-`FAILED`
+### 4.5 Search & RAG Chat
 
-### 4.6 RAG Chat
+The MVP uses **hybrid retrieval**: lexical/full-text search plus semantic vector search.
 
-Users can ask natural-language questions against a selected Knowledge Space.
+RAG pipeline:
 
-Pipeline:
+`Question -> Query processing -> Permission-aware lexical/vector retrieval -> Hybrid ranking -> Context building -> LLM -> Answer + citations`
 
-`Question -> Query processing -> Embedding -> Authorized vector retrieval -> Context building -> LLM -> Answer + citations`
+Permission filtering **MUST** occur before context is sent to the LLM.
 
-Permission filtering must happen before context is sent to the LLM.
+Default low-cost retrieval stack:
 
-### 4.7 Citations
+- PostgreSQL Full-Text Search (FTS)
+- PostgreSQL + pgvector for semantic vector search
+- Application-level hybrid ranking/fusion
 
-Every factual RAG answer should expose its source documents where available.
+This avoids requiring a separate search cluster for the default deployment.
+
+Optional dedicated search adapters:
+
+- Meilisearch
+- OpenSearch
+
+These are introduced only when scale or search requirements justify the additional infrastructure.
+
+### 4.6 Citations
+
+Every factual RAG answer should expose source documents where available.
 
 Citation metadata should include:
 
 - Document name
 - Page/section when available
 - Relevant source reference
+- Ability to open the source document at the relevant location where technically possible
 
-The UI should allow users to open the source document at the relevant location where technically possible.
+## 5. Provider & Infrastructure Settings
 
-## 5. Settings
+### 5.1 LLM Provider
 
-Provider configuration belongs in the application Settings and must not be hard-coded in business logic.
+LLM configuration is selectable between self-hosted and cloud-based providers.
 
-### 5.1 Settings > AI > LLM Provider
+Supported provider classes:
 
-Support an abstraction capable of:
+- Self-hosted: Ollama and other OpenAI-compatible/local inference endpoints
+- Cloud: OpenAI, Anthropic, Google, DeepSeek and other OpenAI-compatible APIs
+- Custom OpenAI-compatible endpoint
 
-- OpenAI
-- Anthropic
-- Google
-- DeepSeek
-- OpenAI-compatible APIs
-- Ollama/local LLM
-- Custom compatible endpoints
+Configuration fields:
 
-Configuration fields may include:
-
-- Provider
-- Base URL
-- API key
+- Provider type
+- Base URL where applicable
+- API key where applicable
 - Default model
 - Temperature
 - Max output tokens
 - Connection test
 
-API keys must be encrypted at rest.
+After provider/model selection, the UI should expose a direct **How-To** link for configuring that provider/model.
 
-### 5.2 Settings > AI > Embedding
+Provider credentials must be encrypted at rest and never written to logs.
+
+### 5.2 Embedding Provider
 
 Configuration:
 
-- Provider
-- Base URL where applicable
-- API key where applicable
+- Self-hosted compatible local endpoint
+- Cloud embedding provider
 - Model
 - Dimensions
+- Base URL/API key where applicable
 - Connection test
 
-Local embedding must be supported for fully private deployments.
+### 5.3 Vector Provider — Pluggable
 
-### 5.3 Settings > AI > RAG
+RAG services must depend on an internal **Vector Store** interface rather than a vendor SDK.
 
-Admin-configurable parameters:
+Recommended default:
 
-- Top K
-- Similarity threshold
-- Chunk size
-- Chunk overlap
-- Maximum context
-- Temperature/default generation controls where applicable
+- **PostgreSQL + pgvector** for the lowest operational complexity and cost in the MVP
 
-Advanced controls should be hidden from normal users.
+Optional adapters:
 
-### 5.4 Settings > Storage
+- Qdrant self-hosted
+- Qdrant Cloud
 
-Support:
+The MVP does not require multiple vector providers to be configured simultaneously in the UI. The architecture must permit additional adapters later.
 
-- Local filesystem
-- S3
-- S3-compatible storage
-- MinIO
+### 5.4 Object Storage
 
-Configuration may include:
+Preferred production storage is the customer's existing **S3-compatible infrastructure**, including existing Biznet Gio S3-compatible storage.
+
+Configuration:
 
 - Endpoint
 - Bucket
@@ -199,114 +196,126 @@ Configuration may include:
 - Base path/prefix
 - Connection test
 
+Local filesystem storage may be supported for development or minimal installations.
+
 Storage credentials must be encrypted at rest.
 
-### 5.5 Settings > Vector Database
+### 5.5 Search Provider
 
-MVP baseline: Qdrant.
+Search is pluggable through an internal **Search Provider** interface.
 
-Configuration:
+Default implementation:
 
-- Endpoint
-- API key
-- Collection naming/configuration
-- Connection test
+- PostgreSQL Full-Text Search
 
-The backend should use an abstraction so other vector databases can be introduced later.
+Optional implementations:
 
-## 6. Security Requirements
+- Meilisearch
+- OpenSearch
 
-- Tenant isolation
-- RBAC
-- Knowledge Space access control
-- Document-level permissions where required
-- Encryption of provider credentials/secrets at rest
+## 6. API & Developer Experience
+
+- Backend API must be documented using OpenAPI/Swagger
+- Swagger UI must be available in development and configurable for protected access in production
+- Provider and storage connection-test endpoints must be available through the API
+- API contracts should be versionable
+
+## 7. Security Requirements
+
+- RBAC enforcement on every protected operation
+- Knowledge/document permission filtering before retrieval results enter LLM context
+- Encryption of provider and storage credentials at rest
 - TLS support
 - Audit logging
 - No secrets in application logs
-- Permission filtering before LLM context construction
 - Configurable data retention
+- Self-hosted/on-premise operation without vendor infrastructure
 
-## 7. Audit Log
+## 8. Audit Log
 
 Audit events include at minimum:
 
 - Login/logout
-- Upload
-- Download
-- Delete
-- Re-index
-- Chat/query
+- Upload/download/delete
+- Re-index and processing failures
+- Search/query/chat
 - Document access
-- User changes
-- Role changes
-- Settings changes
-- Provider changes
+- User and role changes
+- Settings/provider changes
 
-Each event should capture actor, tenant, timestamp, action, target and relevant metadata.
+Each event should capture actor, timestamp, action, target and relevant metadata.
 
-## 8. Dashboard
+## 9. Dashboard
 
 Dashboard should show:
 
 - Document count
-- Knowledge Space count
+- Knowledge Collection count
 - User count
 - Processing status
 - Recent activity
 - Failed processing items
+- Active AI/search/storage provider summary
 
-## 9. Architecture Principles
+## 10. Architecture Principles
 
-### LLM abstraction
+### 10.1 Frontend / Backend
 
-Application services must depend on an internal LLM interface rather than a vendor SDK directly.
+The MVP consists of a web frontend and a backend API.
 
-Conceptual interface:
+- Frontend: Next.js + TypeScript
+- Backend: NestJS + TypeScript
+- Database: PostgreSQL + Prisma
+- API documentation: OpenAPI/Swagger
+- Deployment: Docker Compose
 
-```text
-generate()
-stream()
-embed()
-countTokens()
-```
+The frontend must not access PostgreSQL, object storage or vector stores directly for business operations; these concerns belong behind the backend API.
 
-Provider adapters implement this interface.
+### 10.2 Provider Abstractions
 
-### Storage abstraction
+Business services must depend on internal interfaces rather than vendor SDKs:
 
-Application document services must depend on an internal storage interface.
+- LLM Provider
+- Embedding Provider
+- Vector Store
+- Search Provider
+- Object Storage
 
-The implementation may target local filesystem, S3-compatible storage or MinIO.
+## 11. Recommended Low-Cost Technology Options
 
-### Vector abstraction
+| Layer | Self-hosted Default | Cloud Alternative | Rationale |
+|---|---|---|---|
+| Database + vector | PostgreSQL + pgvector | Managed PostgreSQL + pgvector | One core datastore; lowest operational complexity |
+| Lexical search | PostgreSQL FTS | Managed PostgreSQL FTS | No extra service for MVP |
+| Dedicated search | Meilisearch / OpenSearch | Managed OpenSearch | Optional when scale justifies it |
+| Object storage | S3-compatible | S3-compatible cloud | Use existing customer infrastructure |
+| LLM | Ollama / OpenAI-compatible local | OpenAI / Anthropic / Google / DeepSeek / compatible | Avoid vendor lock-in |
+| Embeddings | Local compatible model | Cloud embedding API | Supports private and cloud modes |
 
-RAG services must depend on an internal vector-search interface, with Qdrant as the MVP implementation.
-
-## 10. MVP Scope Lock
+## 12. MVP Scope Lock
 
 ### Included
 
-- Authentication
-- RBAC
-- Organization/tenant model
-- Knowledge Spaces
-- Document ingestion
-- PDF/DOCX/TXT/CSV/Markdown support
-- PostgreSQL
-- Prisma
-- Qdrant
-- Storage abstraction
-- LLM abstraction
-- Embedding abstraction
-- RAG chat
-- Citations
-- Settings
+- Authentication and session management
+- RBAC: SUPER_USER, EDITOR, VIEWER
+- Single-organization deployment; no multi-tenancy
+- Knowledge Collections and permissions
+- PDF/DOCX/XLSX/TXT/CSV/Markdown ingestion
+- PostgreSQL + Prisma
+- Pluggable vector provider with pgvector as the default
+- Hybrid search using PostgreSQL FTS + vector retrieval
+- S3-compatible object storage
+- Pluggable LLM and embedding providers
+- RAG chat with citations
+- Settings with provider selection and connection tests
+- How-To links for selected LLM/provider configuration
 - Audit log
+- Swagger/OpenAPI
 - Docker Compose deployment
 
-### Explicitly out of scope for MVP
+### Explicitly Out of Scope for MVP
 
+- Multi-tenancy
 - Advanced OCR
 - Multimodal RAG
 - Voice
@@ -315,26 +324,28 @@ RAG services must depend on an internal vector-search interface, with Qdrant as 
 - Mobile application
 - Fine tuning
 - Knowledge graph
-- Multiple vector DB implementations in UI
-- Advanced analytics
 - Complex workflow automation
+- LDAP/Active Directory
+- Multiple vector/search engines configured concurrently in the UI
 
-## 11. Success Criteria
+## 13. Success Criteria
 
 The MVP is successful when:
 
 1. It can run with Docker Compose.
-2. Admin can configure the LLM through Settings.
-3. Customer can use its own LLM/API credentials.
-4. Customer can configure its own storage.
-5. PDF/DOCX documents can be indexed.
-6. Users can query a Knowledge Space.
-7. Answers provide citations.
-8. Unauthorized documents are never included in retrieved context.
-9. Important activities appear in the audit log.
-10. Core On-Premise operation does not depend on vendor-hosted services.
+2. SUPER_USER can configure the selected LLM, embedding, vector and storage providers.
+3. The customer can use either self-hosted or cloud LLM/embedding services.
+4. Production documents can use S3-compatible object storage.
+5. PDF/DOCX/XLSX/TXT/CSV/Markdown documents can be indexed.
+6. Users can search and chat against authorized Knowledge Collections.
+7. Hybrid lexical + semantic retrieval works without requiring a separate search cluster.
+8. Answers provide citations.
+9. Unauthorized documents never enter retrieved context.
+10. Important activities appear in the audit log.
+11. Swagger UI documents the backend API.
+12. Core self-hosted/on-premise operation does not depend on vendor-hosted services.
 
-## 12. Product Differentiator
+## 14. Product Differentiator
 
 Primary positioning:
 
@@ -344,28 +355,30 @@ Customer controls:
 
 - LLM
 - Embedding
-- Storage
-- Vector database
+- Object storage
+- Vector store
+- Search implementation
 - Deployment environment
 - API credentials
 
-This is intended to differentiate the product from generic hosted document-chat applications.
+## 15. Roadmap
 
-## 13. Roadmap
+### V1.0 / MVP
 
-### V1.0
-Private AI Knowledge Base MVP.
+- Private AI Knowledge Base core
+- Single organization
+- Pluggable providers
+- Hybrid retrieval
 
 ### V1.1
-Enterprise security:
 
 - SSO
 - LDAP/Active Directory
 - Vault integration
 - Advanced audit controls
+- Enterprise connectors
 
 ### V1.2
-Enterprise connectors:
 
 - Google Drive
 - SharePoint
@@ -373,11 +386,22 @@ Enterprise connectors:
 - Additional document sources
 
 ### V1.3
-AI agents:
 
+- Controlled AI agents
 - Knowledge -> Action
-- Controlled tools
-- Workflow integration
+- Workflow/tool integration
 
 ### V2
-Enterprise AI platform and broader automation capabilities.
+
+Broader enterprise AI platform and automation capabilities.
+
+## 16. Key Architectural Decisions
+
+1. No multi-tenancy in MVP.
+2. RBAC is limited to SUPER_USER, EDITOR and VIEWER.
+3. PostgreSQL + pgvector is the default vector stack to minimize infrastructure cost.
+4. PostgreSQL FTS is the default lexical search engine; dedicated search engines are optional.
+5. Vector and search components are pluggable through internal interfaces.
+6. Customer S3-compatible object storage is the preferred production storage.
+7. LLM and embedding providers are selectable as self-hosted or cloud-based.
+8. Swagger/OpenAPI is mandatory for backend API documentation.
