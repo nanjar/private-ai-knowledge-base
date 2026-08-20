@@ -1,0 +1,293 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  MANAGER
+  USER
+}
+
+enum MembershipStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+}
+
+enum DocumentStatus {
+  UPLOADED
+  PROCESSING
+  CHUNKING
+  EMBEDDING
+  INDEXED
+  FAILED
+}
+
+enum StorageType {
+  LOCAL
+  S3
+  S3_COMPATIBLE
+}
+
+enum ProviderStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model Organization {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       User[]
+  spaces      KnowledgeSpace[]
+  documents   Document[]
+  auditLogs   AuditLog[]
+  llmConfigs  LlmProviderConfig[]
+  embeddingConfigs EmbeddingProviderConfig[]
+  storageConfigs StorageConfig[]
+  vectorConfigs VectorDatabaseConfig[]
+}
+
+model User {
+  id           String           @id @default(cuid())
+  organizationId String
+  email        String
+  passwordHash String
+  name         String?
+  role         UserRole         @default(USER)
+  status       MembershipStatus @default(ACTIVE)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  spaceMemberships KnowledgeSpaceMember[]
+  documentsUploaded Document[] @relation("DocumentUploader")
+  chatSessions ChatSession[]
+  auditLogs AuditLog[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+}
+
+model KnowledgeSpace {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  slug           String
+  description    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members      KnowledgeSpaceMember[]
+  documents    Document[]
+  chatSessions ChatSession[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId])
+}
+
+model KnowledgeSpaceMember {
+  id        String   @id @default(cuid())
+  spaceId   String
+  userId    String
+  createdAt DateTime @default(now())
+
+  space KnowledgeSpace @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  user  User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([spaceId, userId])
+  @@index([userId])
+}
+
+model Document {
+  id             String         @id @default(cuid())
+  organizationId String
+  spaceId        String
+  uploadedById   String
+  name           String
+  mimeType       String
+  sizeBytes      BigInt
+  checksum       String
+  storageKey     String
+  version        Int            @default(1)
+  status         DocumentStatus @default(UPLOADED)
+  errorMessage   String?
+  metadata       Json?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  space        KnowledgeSpace @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  uploadedBy   User @relation("DocumentUploader", fields: [uploadedById], references: [id])
+  chunks       DocumentChunk[]
+  citations    Citation[]
+
+  @@index([organizationId, spaceId])
+  @@index([checksum])
+  @@index([status])
+}
+
+model DocumentChunk {
+  id         String   @id @default(cuid())
+  documentId String
+  chunkIndex Int
+  content    String
+  pageNumber Int?
+  section    String?
+  vectorId   String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  citations Citation[]
+
+  @@unique([documentId, chunkIndex])
+  @@index([vectorId])
+}
+
+model ChatSession {
+  id         String   @id @default(cuid())
+  userId     String
+  spaceId    String
+  title      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user     User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  space    KnowledgeSpace @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  messages ChatMessage[]
+
+  @@index([userId])
+  @@index([spaceId])
+}
+
+model ChatMessage {
+  id          String   @id @default(cuid())
+  sessionId   String
+  role        String
+  content     String
+  model       String?
+  tokenUsage  Json?
+  createdAt   DateTime @default(now())
+
+  session  ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  citations Citation[]
+
+  @@index([sessionId, createdAt])
+}
+
+model Citation {
+  id         String   @id @default(cuid())
+  messageId  String
+  documentId String
+  chunkId    String?
+  pageNumber Int?
+  quote      String?
+
+  message  ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  chunk    DocumentChunk? @relation(fields: [chunkId], references: [id], onDelete: SetNull)
+
+  @@index([messageId])
+  @@index([documentId])
+}
+
+model LlmProviderConfig {
+  id             String         @id @default(cuid())
+  organizationId String
+  provider       String
+  baseUrl        String?
+  apiKeyEncrypted String?
+  defaultModel   String
+  temperature    Float?
+  maxOutputTokens Int?
+  status         ProviderStatus @default(ACTIVE)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status])
+}
+
+model EmbeddingProviderConfig {
+  id             String         @id @default(cuid())
+  organizationId String
+  provider       String
+  baseUrl        String?
+  apiKeyEncrypted String?
+  model          String
+  dimensions     Int
+  status         ProviderStatus @default(ACTIVE)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status])
+}
+
+model StorageConfig {
+  id             String      @id @default(cuid())
+  organizationId String
+  type           StorageType
+  endpoint       String?
+  bucket         String?
+  region         String?
+  accessKey      String?
+  secretKeyEncrypted String?
+  basePath       String?
+  status         ProviderStatus @default(ACTIVE)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status])
+}
+
+model VectorDatabaseConfig {
+  id             String         @id @default(cuid())
+  organizationId String
+  provider       String         @default("qdrant")
+  endpoint       String
+  apiKeyEncrypted String?
+  collectionPrefix String?
+  status         ProviderStatus @default(ACTIVE)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status])
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  actorUserId    String?
+  action         String
+  targetType     String?
+  targetId       String?
+  metadata       Json?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actor        User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([action])
+}
