@@ -1,0 +1,47 @@
+{
+  "llm": [
+    {
+      "provider": "qwen-local",
+      "model": "qwen3:8b",
+      "displayName": "Qwen3 8B",
+      "type": "local",
+      "baseUrl": "http://ollama:11434/v1",
+      "default": true,
+      "capabilities": { "chat": true, "streaming": true, "toolCalling": true, "vision": false }
+    },
+    {
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "displayName": "DeepSeek V4 Flash",
+      "type": "api",
+      "default": false,
+      "capabilities": { "chat": true, "streaming": true, "toolCalling": true, "vision": false }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-mini",
+      "displayName": "GPT-5.6 mini",
+      "type": "api",
+      "default": false,
+      "capabilities": { "chat": true, "streaming": true, "toolCalling": true, "vision": true }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-haiku",
+      "displayName": "Claude Haiku",
+      "type": "api",
+      "default": false,
+      "capabilities": { "chat": true, "streaming": true, "toolCalling": true, "vision": true }
+    }
+  ],
+  "embedding": [
+    {
+      "provider": "qwen-local",
+      "model": "qwen3-embedding:0.6b",
+      "displayName": "Qwen3 Embedding 0.6B",
+      "type": "local",
+      "baseUrl": "http://ollama:11434/v1",
+      "default": true
+    }
+  ]
+}
